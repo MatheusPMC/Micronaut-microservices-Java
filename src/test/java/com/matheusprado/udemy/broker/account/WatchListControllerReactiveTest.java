@@ -5,9 +5,10 @@ import com.matheusprado.udemy.broker.model.WatchList;
 import com.matheusprado.udemy.broker.store.InMemoryAccountStore;
 import io.micronaut.http.HttpResponse;
 import io.micronaut.http.HttpStatus;
-import io.micronaut.http.client.RxHttpClient;
 import io.micronaut.http.client.annotation.Client;
 import io.micronaut.runtime.EmbeddedApplication;
+import io.micronaut.security.authentication.UsernamePasswordCredentials;
+import io.micronaut.security.token.jwt.render.BearerAccessRefreshToken;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import io.reactivex.Single;
 import org.junit.jupiter.api.Test;
@@ -34,15 +35,15 @@ class WatchListControllerReactiveTest {
     EmbeddedApplication application;
 
     @Inject
-    @Client("/account/watchlist-reactive")
-    RxHttpClient client;
+    @Client("/")
+    JWTWatchListClient client;
 
     @Inject
     InMemoryAccountStore store;
 
     @Test
     void returnsEmptyWatchListForAccount() {
-        final Single<WatchList> result = client.retrieve(GET("/"), WatchList.class).singleOrError();
+        final Single<WatchList> result = client.retrieveWatchList(getAuthorizationHeader()).singleOrError();
         assertTrue(result.blockingGet().getSymbols().isEmpty());
         assertTrue(store.getWatchList(TEST_ACCOUNT_ID).getSymbols().isEmpty());
     }
@@ -54,10 +55,13 @@ class WatchListControllerReactiveTest {
                 .collect(Collectors.toList());
         WatchList watchList = new WatchList(symbols);
         store.updateWatchList(TEST_ACCOUNT_ID, watchList);
-        final WatchList result = client.toBlocking().retrieve("/", WatchList.class);
+
+        var result = client.retrieveWatchList(getAuthorizationHeader()).singleOrError().blockingGet();
         assertEquals(3, result.getSymbols().size());
         assertEquals(3, store.getWatchList(TEST_ACCOUNT_ID).getSymbols().size());
     }
+
+
 
     @Test
     void returnsWatchListForAccountAsSingle() {
@@ -66,7 +70,8 @@ class WatchListControllerReactiveTest {
                 .collect(Collectors.toList());
         WatchList watchList = new WatchList(symbols);
         store.updateWatchList(TEST_ACCOUNT_ID, watchList);
-        final WatchList result = client.toBlocking().retrieve("/single", WatchList.class);
+
+        final WatchList result = client.retrieveWatchListAsSingle(getAuthorizationHeader()).blockingGet();
         assertEquals(3, result.getSymbols().size());
         assertEquals(3, store.getWatchList(TEST_ACCOUNT_ID).getSymbols().size());
     }
@@ -78,7 +83,7 @@ class WatchListControllerReactiveTest {
                 .collect(Collectors.toList());
         WatchList watchList = new WatchList(symbols);
 
-        final HttpResponse<Object> added = client.toBlocking().exchange(PUT("/", watchList));
+        final HttpResponse<Object> added = client.updateWatchList(getAuthorizationHeader(), watchList);
         assertEquals(HttpStatus.OK, added.getStatus());
         assertEquals(watchList, store.getWatchList(TEST_ACCOUNT_ID));
     }
@@ -93,8 +98,16 @@ class WatchListControllerReactiveTest {
         assertFalse(store.getWatchList(TEST_ACCOUNT_ID).getSymbols().isEmpty());
 
 
-        final HttpResponse<Object> deleted = client.toBlocking().exchange(DELETE("/" + TEST_ACCOUNT_ID));
+        final HttpResponse<Object> deleted = client.deleteWatchList(getAuthorizationHeader(), WatchListControllerReactive.ACCOUNT_ID);
         assertEquals(HttpStatus.OK, deleted.getStatus());
         assertTrue(store.getWatchList(TEST_ACCOUNT_ID).getSymbols().isEmpty());
+    }
+
+    private String getAuthorizationHeader() {
+        return "Bearer " + givenMyUserLoggedIn().getAccessToken();
+    }
+
+    private BearerAccessRefreshToken givenMyUserLoggedIn() {
+        return client.login(new UsernamePasswordCredentials("my-user", "secret"));
     }
 }
